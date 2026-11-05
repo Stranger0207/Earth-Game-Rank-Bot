@@ -82,8 +82,8 @@ async def cmd_start(message: Message) -> None:
     await _send_rank_card_response(message, message.from_user.id)
 
 
-@router.message(Command("myrank"))
-@router.message(Command("rank"))
+@router.message(Command("myrank", "rank", "رنک", "مقام"))
+@router.message(F.text.in_({"رنک", "/رنک", "مقام من", "/myrank", "/rank"}))
 async def cmd_myrank(message: Message) -> None:
     """مشاهده کارت مقام خود کاربر."""
     if not message.from_user:
@@ -91,7 +91,8 @@ async def cmd_myrank(message: Message) -> None:
     await _send_rank_card_response(message, message.from_user.id)
 
 
-@router.message(Command("top"))
+@router.message(Command("top", "تاپ", "برترینها"))
+@router.message(F.text.in_({"تاپ", "/تاپ", "برترینها", "/برترینها", "/top"}))
 async def cmd_top(message: Message) -> None:
     """نمایش جدول افتخار و برترین رتبه‌ها."""
     async for session in get_session():
@@ -109,7 +110,8 @@ async def cmd_top(message: Message) -> None:
         await message.reply(text)
 
 
-@router.message(Command("ranks"))
+@router.message(Command("ranks", "نردبان", "مقامها"))
+@router.message(F.text.in_({"نردبان", "/نردبان", "مقامها", "/مقامها", "/ranks"}))
 async def cmd_ranks(message: Message) -> None:
     """نمایش نردبان ۲۱ مقام و جایگاه کاربر."""
     user_id = message.from_user.id if message.from_user else 0
@@ -125,7 +127,8 @@ async def cmd_ranks(message: Message) -> None:
         await message.reply(text)
 
 
-@router.message(Command("history"))
+@router.message(Command("history", "سوابق", "تاریخچه"))
+@router.message(F.text.in_({"سوابق", "/سوابق", "تاریخچه", "/تاریخچه", "/history"}))
 async def cmd_history(message: Message) -> None:
     """مشاهده خط زمانی تغییرات مقام خود کاربر."""
     if not message.from_user:
@@ -147,7 +150,8 @@ async def cmd_history(message: Message) -> None:
         await message.reply(text)
 
 
-@router.message(Command("medals"))
+@router.message(Command("medals", "مدالها", "نشانها"))
+@router.message(F.text.in_({"مدالها", "/مدالها", "نشانها", "/نشانها", "/medals"}))
 async def cmd_medals(message: Message) -> None:
     """مشاهده نشان‌های کسب‌شده و قفل‌شده کاربر."""
     if not message.from_user:

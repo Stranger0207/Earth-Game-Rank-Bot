@@ -50,33 +50,3 @@ async def on_chat_member_updated(event: ChatMemberUpdated) -> None:
                 member.in_group = False
                 await session.commit()
                 logger.info("عضو از گروه خارج شد: %s (%s)", user.full_name, user.id)
-
-
-@router.message(F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}))
-async def on_group_message(message: Message) -> None:
-    """ردگیری پیام‌ها در گروه برای به‌روزرسانی جدول اعضای شناخته‌شده."""
-    if not message.from_user or message.from_user.is_bot:
-        return
-
-    # پردازش در صورت پیام‌های سرویسی ورود
-    if message.new_chat_members:
-        for new_user in message.new_chat_members:
-            if not new_user.is_bot:
-                async for session in get_session():
-                    await MemberService.handle_join(
-                        session=session,
-                        telegram_id=new_user.id,
-                        username=new_user.username,
-                        full_name=new_user.full_name,
-                    )
-        return
-
-    # پیام معمولی کاربر: به‌روزرسانی مشخصات هویتی و آخرین مشاهده
-    async for session in get_session():
-        await MemberService.track_activity(
-            session=session,
-            telegram_id=message.from_user.id,
-            username=message.from_user.username,
-            full_name=message.from_user.full_name,
-            is_in_group=True,
-        )

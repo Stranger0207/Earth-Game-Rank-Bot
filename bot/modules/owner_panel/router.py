@@ -44,7 +44,8 @@ async def _log_to_channel(bot, text: str) -> None:
             logger.error("خطا در ارسال پیام به کانال لاگ: %s", exc)
 
 
-@router.message(Command("panel"))
+@router.message(Command("panel", "پنل"))
+@router.message(F.text.in_({"پنل", "/panel", "/پنل"}))
 async def cmd_panel(message: Message) -> None:
     """نمایش پنل اصلی فرماندهی با دکمه‌های شیشه‌ای."""
     async for session in get_session():
@@ -315,3 +316,192 @@ async def on_cancel_action(call: CallbackQuery) -> None:
 @router.callback_query(F.data == "panel_action:close")
 async def on_panel_close(call: CallbackQuery) -> None:
     await call.message.delete()
+
+
+@router.callback_query(F.data == "panel_action:roster")
+async def on_panel_roster(call: CallbackQuery) -> None:
+    await call.answer()
+    await call.message.edit_text("⏳ در حال ارتباط با ربات اصلی و دریافت روستر بازیکنان...")
+    from ..roster.service import RosterService
+    from ...core.utils.format import split_text
+
+    async for session in get_session():
+        try:
+            snapshot, players = await RosterService.fetch_and_snapshot(session)
+        except Exception as exc:
+            snapshot, players = await RosterService.get_latest_snapshot(session)
+            if not players:
+                await call.message.edit_text(f"❌ خطا در دریافت روستر و عدم وجود اسنپ‌شات قبلی:\n<code>{clean_html(str(exc))}</code>")
+                return
+
+        lines = [
+            header("فهرست بازیکنان فعال فصل (Roster Snapshot)", "📋"),
+            f"👥 تعداد کل بازیکنان: {bold(fa_number(len(players)))}",
+            f"📅 شناسه اسنپ‌شات: <code>{snapshot.id}</code>",
+            DIVIDER,
+        ]
+
+        for i, p in enumerate(players[:50], 1):
+            name = clean_html(p.get("full_name") or p.get("username") or str(p.get("telegram_id")))
+            country = f" ({clean_html(p.get('country'))})" if p.get("country") else ""
+            lines.append(f"{fa_number(i)}. {name}{country} — <code>{p.get('telegram_id')}</code>")
+
+        if len(players) > 50:
+            lines.append(f"\n... و {fa_number(len(players) - 50)} بازیکن دیگر")
+
+        chunks = split_text("\n".join(lines), max_length=4000)
+        await call.message.edit_text(chunks[0])
+
+
+@router.callback_query(F.data == "panel_action:season_preview")
+async def on_panel_season_preview(call: CallbackQuery) -> None:
+    await call.answer()
+    await call.message.edit_text("⏳ در حال محاسبه پیش‌نمایش ترفیعات فصلی...")
+    from ..roster.service import RosterService
+    from ..season.service import SeasonService
+
+    async for session in get_session():
+        _, players = await RosterService.get_latest_snapshot(session)
+        if not players:
+            try:
+                _, players = await RosterService.fetch_and_snapshot(session)
+            except Exception as exc:
+                await call.message.edit_text(f"❌ امکان دریافت روستر وجود ندارد:\n<code>{clean_html(str(exc))}</code>")
+                return
+
+        preview = await SeasonService.preview_season(session, players)
+        lines = [
+            header("پیش‌نمایش ارتقای پایان فصل (Simulation)", "🔮"),
+            f"👥 کل بازیکنان فعال: {bold(fa_number(preview['total_players']))}",
+            f"📈 مشمول ترفیع درجه: {bold(fa_number(preview['promoted_count']))} نفر",
+            f"🆕 بازیکنان تازه وارد: {bold(fa_number(preview['new_recruits_count']))} نفر",
+            f"🔒 مانده در سقف خودکار (سرهنگ به بالا): {bold(fa_number(preview['capped_count']))} نفر",
+            DIVIDER,
+            "💡 هیچ تغییری در پایگاه داده اعمال نشد.",
+        ]
+        await call.message.edit_text("\n".join(lines))
+
+
+@router.callback_query(F.data == "panel_action:audit")
+async def on_panel_audit(call: CallbackQuery) -> None:
+    await call.answer()
+    await call.message.edit_text("⏳ در حال ممیزی اعضا و بررسی تگ‌های تلگرام...")
+    from ..audit.service import AuditService
+
+    stats = await AuditService.run_audit(bot=call.bot)
+    text = (
+        f"{header('گزارش ممیزی تگ‌ها', '📋')}\n"
+        f"👥 اعضای بررسی‌شده: {bold(fa_number(stats['total_checked']))}\n"
+        f"🏷 ارسال‌شده به صف اصلاح تگ: {bold(fa_number(stats['enqueued']))}\n"
+        f"{DIVIDER}\n"
+        "✅ فرآیند با موفقیت آغاز شد و تگ‌ها در پس‌زمینه اصلاح خواهند شد."
+    )
+    await call.message.edit_text(text)
+
+
+@router.callback_query(F.data == "panel_action:selftest")
+async def on_panel_selftest(call: CallbackQuery) -> None:
+    await call.answer()
+    await call.message.edit_text("🩺 در حال اجرای تست‌های تشخیصی سلامت سامانه...")
+    from ..audit.service import AuditService
+
+    report = await AuditService.run_selftest(bot=call.bot)
+    lines = [header("نتایج تست سلامت سامانه (Self-Test)", "🩺")]
+
+    for key, data in report.items():
+        icon = "✅" if data["ok"] else "❌"
+        lines.append(f"{icon} <b>{key}</b>: {data['detail']}")
+
+    lines.append(DIVIDER)
+    overall_ok = all(d["ok"] for d in report.values())
+    if overall_ok:
+        lines.append("🎉 وضعیت کلی سیستم: <b>کاملاً سالم و عملیاتی</b>")
+    else:
+        lines.append("⚠️ وضعیت کلی: <b>برخی موارد نیاز به توجه دارند</b>")
+
+    await call.message.edit_text("\n".join(lines))
+
+
+@router.callback_query(F.data.startswith("panel_confirm:"))
+async def on_panel_confirm_prompt(call: CallbackQuery) -> None:
+    await call.answer()
+    parts = call.data.split(":")
+    action = parts[1]
+    param = parts[2] if len(parts) > 2 else "1"
+    delta = int(param) if param.isdigit() else 1
+
+    async for session in get_session():
+        if action == "promote_players":
+            count = await session.scalar(
+                select(func.count(Member.telegram_id)).where(Member.is_player.is_(True))
+            ) or 0
+            text = (
+                f"⚠️ <b>تأیید عملیات ارتقای گروهی بازیکنان</b>\n\n"
+                f"تعداد بازیکنان شناسایی‌شده: {bold(fa_number(count))}\n"
+                f"میزان ارتقا: {bold(fa_number(delta))} درجه\n\n"
+                "آیا از اجرای این حکم اطمینان دارید؟"
+            )
+            await call.message.edit_text(text, reply_markup=confirm_dialog_keyboard("promote_players", str(delta)))
+        elif action == "promote_all":
+            count = await session.scalar(select(func.count(Member.telegram_id))) or 0
+            text = (
+                f"⚠️ <b>تأیید عملیات سراسری ارتقای تمامی اعضا</b>\n\n"
+                f"تعداد کل اعضا: {bold(fa_number(count))}\n"
+                f"میزان ارتقا: {bold(fa_number(delta))} درجه\n\n"
+                "آیا از اجرای این حکم گسترده اطمینان دارید؟"
+            )
+            await call.message.edit_text(text, reply_markup=confirm_dialog_keyboard("promote_all", str(delta)))
+
+
+@router.callback_query(F.data == "panel_action:export")
+async def on_panel_export(call: CallbackQuery) -> None:
+    await call.answer()
+    await call.message.answer("⏳ در حال استخراج داده‌ها و تولید فایل اکسل/CSV...")
+    import csv, io
+    from ...core.db.models.member import Member
+    from ...domain.ranks import get_rank
+    from ...core.db.base import utcnow
+    from aiogram.types import BufferedInputFile
+
+    async for session in get_session():
+        stmt = select(Member).order_by(Member.rank_level.desc(), Member.rank_reached_at.asc())
+        res = await session.execute(stmt)
+        members = list(res.scalars().all())
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "Telegram ID", "Username", "Full Name", "Rank Level", "Rank Title",
+            "Tier", "Seasons Participated", "Is Player", "In Group", "Tag Synced", "Rank Reached At"
+        ])
+
+        for m in members:
+            r = get_rank(m.rank_level)
+            writer.writerow([
+                m.telegram_id, f"@{m.username}" if m.username else "", m.full_name,
+                m.rank_level, r.name_fa, r.tier, m.seasons_participated,
+                "بله" if m.is_player else "خیر", "بله" if m.in_group else "خیر",
+                "همگام" if m.tag_synced else "ناهماهنگ",
+                m.rank_reached_at.isoformat() if m.rank_reached_at else ""
+            ])
+
+        csv_bytes = output.getvalue().encode("utf-8-sig")
+        now_str = utcnow().strftime("%Y%m%d_%H%M%S")
+        doc = BufferedInputFile(csv_bytes, filename=f"ranks_export_{now_str}.csv")
+        await call.message.answer_document(document=doc, caption=f"📊 خروجی سوابق اعضا شامل {fa_number(len(members))} رکورد.")
+
+
+@router.callback_query(F.data == "panel_action:settings")
+async def on_panel_settings(call: CallbackQuery) -> None:
+    await call.answer()
+    settings = get_settings()
+    text = (
+        f"{header('تنظیمات فعلی سامانه', '⚙️')}\n"
+        f"🎯 شناسه گروه هدف: <code>{settings.target_chat_id}</code>\n"
+        f"👑 مالکان: <code>{settings.owner_ids}</code>\n"
+        f"⏱ کول‌داون کاربران: {fa_number(settings.member_cmd_cooldown_sec)} ثانیه\n"
+        f"🌐 منبع روستر: <code>{settings.roster_source}</code>\n"
+        f"🚪 خروج از گروه‌های غیرمجاز: {'فعال' if settings.auto_leave_unauthorized_groups else 'غیرفعال'}\n"
+        f"🕒 منطقه زمانی: {settings.tz}\n"
+    )
+    await call.message.edit_text(text)

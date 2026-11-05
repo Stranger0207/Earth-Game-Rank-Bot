@@ -34,10 +34,16 @@ class OwnerOnlyMiddleware(BaseMiddleware):
             user_id = event.from_user.id
 
         if user_id is None or not settings.is_owner(user_id):
-            # کاربر مالک نیست: بی‌صدا نادیده گرفته می‌شود
-            logger.debug("درخواست کاربر غیرمالک %s نادیده گرفته شد.", user_id)
-            if isinstance(event, CallbackQuery):
-                await event.answer()
+            logger.info("درخواست دستور مالک توسط کاربر غیرمجاز %s رد شد.", user_id)
+            if isinstance(event, Message):
+                if event.chat.type == "private":
+                    await event.reply(
+                        f"⛔️ <b>دسترسی غیرمجاز</b>\n\n"
+                        f"شناسه تلگرام شما: <code>{user_id}</code>\n"
+                        f"این شناسه در متغیر <code>OWNER_IDS</code> فایل <code>.env</code> ثبت نشده است."
+                    )
+            elif isinstance(event, CallbackQuery):
+                await event.answer("⛔️ شما مجاز به انجام این عملیات نیستید.", show_alert=True)
             return None
 
         return await handler(event, data)
