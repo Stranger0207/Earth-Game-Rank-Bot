@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     bot_token: str = ""
 
     # شناسه‌های عددی مالکان مجاز
-    owner_ids: list[int] = []
+    owner_ids: list[int] | str = []
 
     # گروه تلگرامی اصلی (Supergroup) که تگ‌ها در آن مدیریت می‌شوند
     target_chat_id: int = -1002641478967
@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     roster_source: str = "http"
 
     # فهرست ماژول‌های فعال (اگر خالی باشد همه فعال خواهند بود)
-    enabled_modules: list[str] = []
+    enabled_modules: list[str] | str = []
 
     # خروج خودکار از گروه‌هایی که گروه هدف نیستند
     auto_leave_unauthorized_groups: bool = True
@@ -59,6 +59,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        case_sensitive=False,
     )
 
     @field_validator("owner_ids", mode="before")
@@ -89,7 +90,9 @@ class Settings(BaseSettings):
 
     def is_owner(self, user_id: int) -> bool:
         """آیا کاربر جزء مالکان مجاز سیستم است؟"""
-        return user_id in self.owner_ids
+        if isinstance(self.owner_ids, (list, tuple, set)):
+            return user_id in self.owner_ids
+        return False
 
 
 @lru_cache(maxsize=1)
