@@ -1,0 +1,17 @@
+[Unit]
+Description=Rank Bot - The Earth Game Military Ranks Telegram Bot
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/rank-bot
+Environment=PYTHONUTF8=1
+ExecStart=/opt/rank-bot/.venv/bin/python -m bot
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

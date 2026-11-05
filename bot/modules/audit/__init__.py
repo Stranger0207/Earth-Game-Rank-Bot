@@ -7,7 +7,8 @@ from .service import AuditService
 
 def setup(ctx: AppContext) -> None:
     """ثبت روتر و جاب دوره‌ای ممیزی شبانه."""
-    ctx.dp.include_router(router)
+    if router.parent_router is None:
+        ctx.dp.include_router(router)
 
     # جاب شبانه ساعت ۴:۰۰ صبح برای ممیزی تگ‌ها
     ctx.scheduler.add_job(

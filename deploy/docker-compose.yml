@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  rank-bot:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: rank_bot
+    restart: always
+    environment:
+      - PYTHONUTF8=1
+    env_file:
+      - ../.env
+    network_mode: "host"
+    volumes:
+      - ../data:/app/data
