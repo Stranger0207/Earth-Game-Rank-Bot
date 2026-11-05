@@ -97,13 +97,17 @@ class Settings(BaseSettings):
     @field_validator("owner_ids", mode="before")
     @classmethod
     def parse_owner_ids(cls, v: Any) -> list[int]:
-        """پارس کردن شناسه‌های مالکان از رشته‌های حاوی کاما یا لیست مستقیم."""
+        """پارس کردن شناسه‌های مالکان از عدد، رشته‌های حاوی کاما یا لیست مستقیم."""
+        if v is None:
+            return []
+        if isinstance(v, (int, float)):
+            return [int(v)]
         if isinstance(v, str):
             cleaned = v.strip()
             if not cleaned:
                 return []
             return [int(x.strip()) for x in cleaned.split(",") if x.strip()]
-        if isinstance(v, (list, tuple)):
+        if isinstance(v, (list, tuple, set)):
             return [int(x) for x in v]
         return []
 
@@ -111,19 +115,27 @@ class Settings(BaseSettings):
     @classmethod
     def parse_enabled_modules(cls, v: Any) -> list[str]:
         """پارس کردن فهرست ماژول‌های فعال از رشته یا لیست."""
+        if v is None:
+            return []
+        if isinstance(v, (int, float)):
+            return [str(v)]
         if isinstance(v, str):
             cleaned = v.strip()
             if not cleaned:
                 return []
             return [x.strip() for x in cleaned.split(",") if x.strip()]
-        if isinstance(v, (list, tuple)):
+        if isinstance(v, (list, tuple, set)):
             return [str(x).strip() for x in v if str(x).strip()]
         return []
 
-    def is_owner(self, user_id: int) -> bool:
+    def is_owner(self, user_id: int | str) -> bool:
         """آیا کاربر جزء مالکان مجاز سیستم است؟"""
+        try:
+            uid = int(user_id)
+        except (ValueError, TypeError):
+            return False
         if isinstance(self.owner_ids, (list, tuple, set)):
-            return user_id in self.owner_ids
+            return uid in self.owner_ids
         return False
 
 
