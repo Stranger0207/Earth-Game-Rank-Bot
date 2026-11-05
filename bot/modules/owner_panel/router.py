@@ -1,0 +1,317 @@
+"""
+هندلرهای دستورات و پنل شیشه‌ای مالکان (Owner Panel Router).
+"""
+
+from __future__ import annotations
+
+import logging
+from aiogram import F, Router
+from aiogram.filters import Command
+from aiogram.types import CallbackQuery, Message
+from sqlalchemy import func, select
+
+from ...core.config import get_settings
+from ...core.db.base import get_session
+from ...core.db.models.achievement import Achievement
+from ...core.db.models.history import RankHistory
+from ...core.db.models.member import Member
+from ...core.db.models.tag_queue import TagQueueItem
+from ...core.middlewares.owner_guard import OwnerOnlyMiddleware
+from ...core.utils.format import fa_number
+from ...core.utils.html import bold, clean_html
+from ...core.utils.ui import header
+from ...domain.ranks import find_rank, get_rank
+from ..members.resolver import resolve_target
+from ..members.service import MemberService
+from ..ranks.service import RankService
+from .keyboards import confirm_dialog_keyboard, panel_main_keyboard
+from .texts import member_dossier_text, panel_welcome_text
+
+logger = logging.getLogger(__name__)
+
+router = Router(name="owner_panel")
+router.message.middleware(OwnerOnlyMiddleware())
+router.callback_query.middleware(OwnerOnlyMiddleware())
+
+
+async def _log_to_channel(bot, text: str) -> None:
+    """ارسال لاگ عملیات حساس به چت لاگ مالکان در صورت پیکربندی."""
+    settings = get_settings()
+    if settings.log_chat_id:
+        try:
+            await bot.send_message(chat_id=settings.log_chat_id, text=text)
+        except Exception as exc:
+            logger.error("خطا در ارسال پیام به کانال لاگ: %s", exc)
+
+
+@router.message(Command("panel"))
+async def cmd_panel(message: Message) -> None:
+    """نمایش پنل اصلی فرماندهی با دکمه‌های شیشه‌ای."""
+    async for session in get_session():
+        m_count = await session.scalar(select(func.count(Member.telegram_id))) or 0
+        s_count = await session.scalar(select(func.count(Member.telegram_id)).where(Member.tag_synced.is_(True))) or 0
+        p_count = await session.scalar(select(func.count(TagQueueItem.id)).where(TagQueueItem.status == "pending")) or 0
+
+        text = panel_welcome_text(m_count, s_count, p_count)
+        await message.answer(text, reply_markup=panel_main_keyboard())
+
+
+@router.message(Command("who"))
+async def cmd_who(message: Message) -> None:
+    """مشاهده پرونده کامل نظامی یک عضو."""
+    args = (message.text or "").partition(" ")[2].strip()
+    async for session in get_session():
+        res = await resolve_target(message, session, args)
+        if res.error_message:
+            await message.reply(res.error_message)
+            return
+
+        member = res.member
+        if not member:
+            await message.reply("❌ عضو یافت نشد.")
+            return
+
+        rank = get_rank(member.rank_level)
+        hist_count = await session.scalar(
+            select(func.count(RankHistory.id)).where(RankHistory.telegram_id == member.telegram_id)
+        ) or 0
+        ach_count = await session.scalar(
+            select(func.count(Achievement.id)).where(Achievement.telegram_id == member.telegram_id)
+        ) or 0
+
+        text = member_dossier_text(member, rank, hist_count, ach_count)
+        await message.reply(text)
+
+
+@router.message(Command("promote"))
+async def cmd_promote(message: Message) -> None:
+    """ارتقای دستی درجه کاربر: /promote [target] [n=1] [دلیل]"""
+    args = (message.text or "").partition(" ")[2].strip()
+    async for session in get_session():
+        res = await resolve_target(message, session, args)
+        if res.error_message:
+            await message.reply(res.error_message)
+            return
+
+        rem = res.remaining_text.strip()
+        delta = 1
+        reason = None
+
+        if rem:
+            parts = rem.split(maxsplit=1)
+            token = parts[0].translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
+            if token.isdigit():
+                delta = max(1, int(token))
+                reason = parts[1].strip() if len(parts) > 1 else None
+            else:
+                reason = rem
+
+        member, old_lvl, new_lvl = await RankService.promote(
+            session=session,
+            telegram_id=res.telegram_id,
+            delta=delta,
+            reason=reason,
+            actor_id=message.from_user.id,
+            source="manual",
+        )
+
+        old_rank = get_rank(old_lvl)
+        new_rank = get_rank(new_lvl)
+
+        msg = (
+            f"🎖 <b>حکم ترفیع درجه صادر شد</b>\n\n"
+            f"👤 عضو: {bold(clean_html(member.full_name or str(member.telegram_id)))}\n"
+            f"📉 از: {old_rank.name_fa} (سطح {fa_number(old_lvl)})\n"
+            f"📈 به: {bold(new_rank.name_fa)} (سطح {fa_number(new_lvl)})\n"
+        )
+        if reason:
+            msg += f"📜 دلیل: <i>{clean_html(reason)}</i>\n"
+
+        await message.reply(msg)
+        await _log_to_channel(
+            message.bot,
+            f"🎖 [ارتقای دستی] {member.telegram_id} توسط {message.from_user.id}: {old_lvl} -> {new_lvl} ({reason or 'بدون دلیل'})",
+        )
+
+
+@router.message(Command("demote"))
+async def cmd_demote(message: Message) -> None:
+    """تنزل درجه کاربر: /demote [target] [n=1] [دلیل]"""
+    args = (message.text or "").partition(" ")[2].strip()
+    async for session in get_session():
+        res = await resolve_target(message, session, args)
+        if res.error_message:
+            await message.reply(res.error_message)
+            return
+
+        rem = res.remaining_text.strip()
+        delta = 1
+        reason = None
+
+        if rem:
+            parts = rem.split(maxsplit=1)
+            token = parts[0].translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
+            if token.isdigit():
+                delta = max(1, int(token))
+                reason = parts[1].strip() if len(parts) > 1 else None
+            else:
+                reason = rem
+
+        member, old_lvl, new_lvl = await RankService.demote(
+            session=session,
+            telegram_id=res.telegram_id,
+            delta=delta,
+            reason=reason,
+            actor_id=message.from_user.id,
+            source="manual",
+        )
+
+        old_rank = get_rank(old_lvl)
+        new_rank = get_rank(new_lvl)
+
+        msg = (
+            f"🔻 <b>حکم تنزل درجه صادر شد</b>\n\n"
+            f"👤 عضو: {bold(clean_html(member.full_name or str(member.telegram_id)))}\n"
+            f"📈 از: {old_rank.name_fa} (سطح {fa_number(old_lvl)})\n"
+            f"📉 به: {bold(new_rank.name_fa)} (سطح {fa_number(new_lvl)})\n"
+        )
+        if reason:
+            msg += f"📜 دلیل: <i>{clean_html(reason)}</i>\n"
+
+        await message.reply(msg)
+        await _log_to_channel(
+            message.bot,
+            f"🔻 [تنزل دستی] {member.telegram_id} توسط {message.from_user.id}: {old_lvl} -> {new_lvl}",
+        )
+
+
+@router.message(Command("setrank"))
+async def cmd_setrank(message: Message) -> None:
+    """انتصاب مستقیم یک مقام: /setrank [target] [عدد یا نام مقام]"""
+    args = (message.text or "").partition(" ")[2].strip()
+    async for session in get_session():
+        res = await resolve_target(message, session, args)
+        if res.error_message:
+            await message.reply(res.error_message)
+            return
+
+        target_rank_input = res.remaining_text.strip()
+        if not target_rank_input:
+            await message.reply("❌ لطفاً شماره سطح (۱ تا ۲۱) یا نام مقام را مشخص کنید.")
+            return
+
+        target_rank = find_rank(target_rank_input)
+        if not target_rank:
+            await message.reply(f"❌ مقامی با عنوان یا سطح «{clean_html(target_rank_input)}» یافت نشد.")
+            return
+
+        member, old_lvl, new_lvl = await RankService.set_rank(
+            session=session,
+            telegram_id=res.telegram_id,
+            target_level=target_rank.level,
+            actor_id=message.from_user.id,
+            source="setrank",
+        )
+
+        msg = (
+            f"🎖 <b>مقام با موفقیت انتصاب یافت</b>\n\n"
+            f"👤 عضو: {bold(clean_html(member.full_name or str(member.telegram_id)))}\n"
+            f"🏷 مقام جدید: {bold(target_rank.name_fa)} (سطح {fa_number(new_lvl)})\n"
+        )
+        await message.reply(msg)
+        await _log_to_channel(
+            message.bot,
+            f"🎖 [SetRank] {member.telegram_id} توسط {message.from_user.id} -> سطح {new_lvl} ({target_rank.name_fa})",
+        )
+
+
+@router.message(Command("promote_players"))
+async def cmd_promote_players(message: Message) -> None:
+    """درخواست ارتقای گروهی بازیکنان (تأیید دو مرحله‌ای)."""
+    args = (message.text or "").partition(" ")[2].strip()
+    delta = 1
+    if args.isdigit():
+        delta = max(1, int(args))
+
+    async for session in get_session():
+        count = await session.scalar(
+            select(func.count(Member.telegram_id)).where(Member.is_player.is_(True))
+        ) or 0
+
+        text = (
+            f"⚠️ <b>تأیید عملیات ارتقای گروهی بازیکنان</b>\n\n"
+            f"تعداد بازیکنان شناسایی‌شده: {bold(fa_number(count))}\n"
+            f"میزان ارتقا: {bold(fa_number(delta))} درجه\n\n"
+            "آیا از اجرای این حکم اطمینان دارید؟"
+        )
+        await message.reply(text, reply_markup=confirm_dialog_keyboard("promote_players", str(delta)))
+
+
+@router.message(Command("promote_all"))
+async def cmd_promote_all(message: Message) -> None:
+    """درخواست ارتقای تمام اعضای گروه (تأیید دو مرحله‌ای)."""
+    args = (message.text or "").partition(" ")[2].strip()
+    delta = 1
+    if args.isdigit():
+        delta = max(1, int(args))
+
+    async for session in get_session():
+        count = await session.scalar(select(func.count(Member.telegram_id))) or 0
+
+        text = (
+            f"⚠️ <b>تأیید عملیات سراسری ارتقای تمامی اعضا</b>\n\n"
+            f"تعداد کل اعضا: {bold(fa_number(count))}\n"
+            f"میزان ارتقا: {bold(fa_number(delta))} درجه\n\n"
+            "آیا از اجرای این حکم گسترده اطمینان دارید؟"
+        )
+        await message.reply(text, reply_markup=confirm_dialog_keyboard("promote_all", str(delta)))
+
+
+# کال‌بک‌های تأیید و انصراف دومرحله‌ای
+@router.callback_query(F.data.startswith("confirm_act:"))
+async def on_confirm_action(call: CallbackQuery) -> None:
+    parts = call.data.split(":")
+    action = parts[1]
+    param = parts[2] if len(parts) > 2 else "1"
+    delta = int(param) if param.isdigit() else 1
+
+    await call.message.edit_text("⏳ در حال پردازش و اعمال احکام... لطفاً شکیبا باشید.")
+
+    async for session in get_session():
+        if action == "promote_players":
+            stmt = select(Member).where(Member.is_player.is_(True))
+            res = await session.execute(stmt)
+            members = list(res.scalars().all())
+            for m in members:
+                await RankService.promote(
+                    session=session,
+                    telegram_id=m.telegram_id,
+                    delta=delta,
+                    actor_id=call.from_user.id,
+                    source="bulk_players",
+                )
+            await call.message.edit_text(f"✅ ارتقای گروهی {fa_number(len(members))} بازیکن با موفقیت اعمال شد.")
+
+        elif action == "promote_all":
+            stmt = select(Member)
+            res = await session.execute(stmt)
+            members = list(res.scalars().all())
+            for m in members:
+                await RankService.promote(
+                    session=session,
+                    telegram_id=m.telegram_id,
+                    delta=delta,
+                    actor_id=call.from_user.id,
+                    source="bulk_all",
+                )
+            await call.message.edit_text(f"✅ ارتقای سراسری {fa_number(len(members))} عضو با موفقیت اعمال شد.")
+
+
+@router.callback_query(F.data.startswith("cancel_act:"))
+async def on_cancel_action(call: CallbackQuery) -> None:
+    await call.message.edit_text("❌ عملیات با موفقیت لغو شد.")
+
+
+@router.callback_query(F.data == "panel_action:close")
+async def on_panel_close(call: CallbackQuery) -> None:
+    await call.message.delete()

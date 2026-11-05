@@ -83,10 +83,24 @@ def _apply_column_migrations(sync_conn) -> None:
             sync_conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
 
 
+def set_engine(custom_engine) -> None:
+    """تنظیم دستی موتور و کارخانه‌ی سشن (مخصوص تست‌ها)."""
+    global _engine, _session_factory
+    _engine = custom_engine
+    _session_factory = async_sessionmaker(
+        bind=custom_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+
 async def init_db(custom_engine=None) -> None:
     """
     راه‌اندازی اولیه‌ی جداول دیتابیس و اجرای مهاجرت‌های سبک ستون‌ها.
     """
+    if custom_engine is not None:
+        set_engine(custom_engine)
+
     # وارد کردن مدل‌ها تا متادیتای Base پر شود
     from . import models  # noqa: F401
 
