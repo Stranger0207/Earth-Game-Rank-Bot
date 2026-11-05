@@ -62,6 +62,38 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
+    @field_validator("log_chat_id", mode="before")
+    @classmethod
+    def parse_log_chat_id(cls, v: Any) -> int | None:
+        """پارس کردن شناسه چت لاگ (تبدیل رشته‌های خالی به None)."""
+        if v is None or v == "":
+            return None
+        if isinstance(v, str):
+            cleaned = v.strip()
+            if not cleaned or cleaned.lower() in ("none", "null"):
+                return None
+            return int(cleaned)
+        return int(v)
+
+    @field_validator("target_chat_id", mode="before")
+    @classmethod
+    def parse_target_chat_id(cls, v: Any) -> int:
+        """پارس کردن شناسه چت هدف با حفظ پیش‌فرض در صورت خالی بودن."""
+        if v is None or v == "":
+            return -1002641478967
+        return int(v)
+
+    @field_validator("member_cmd_cooldown_sec", "rank_bot_api_port", mode="before")
+    @classmethod
+    def parse_ints_with_defaults(cls, v: Any, info) -> int:
+        """پارس کردن پورت و کول‌داون با حفظ پیش‌فرض در صورت خالی بودن در env."""
+        if v is None or v == "":
+            if info.field_name == "rank_bot_api_port":
+                return 8091
+            if info.field_name == "member_cmd_cooldown_sec":
+                return 20
+        return int(v)
+
     @field_validator("owner_ids", mode="before")
     @classmethod
     def parse_owner_ids(cls, v: Any) -> list[int]:
