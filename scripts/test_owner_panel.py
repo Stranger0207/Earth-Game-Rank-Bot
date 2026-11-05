@@ -10,10 +10,12 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from bot.modules.owner_panel.keyboards import (
+    back_to_panel_keyboard,
     confirm_dialog_keyboard,
     panel_main_keyboard,
 )
 from bot.modules.owner_panel.texts import member_dossier_text, panel_welcome_text
+from bot.modules.owner_panel.router import router as panel_router
 from bot.domain.ranks import get_rank
 
 
@@ -30,6 +32,11 @@ def test_keyboards() -> None:
     c_btns = [btn for row in confirm_kb.inline_keyboard for btn in row]
     assert any("تأیید" in btn.text for btn in c_btns)
     assert any("انصراف" in btn.text for btn in c_btns)
+
+    # تست کیبورد بازگشت به منو
+    back_kb = back_to_panel_keyboard()
+    b_btns = [btn for row in back_kb.inline_keyboard for btn in row]
+    assert any("بازگشت" in btn.text for btn in b_btns)
     print("✅ ساخت کیبوردهای شیشه‌ای و تاییدهای دومرحله‌ای با موفقیت تأیید شد.")
 
 

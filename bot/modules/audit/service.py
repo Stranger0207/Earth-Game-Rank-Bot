@@ -50,7 +50,10 @@ class AuditService:
             await session.commit()
 
         # تلاش فوری برای پردازش بخشی از صف
-        await TagService.process_queue_batch(bot=bot, limit=20)
+        try:
+            await TagService.process_queue_batch(bot=bot, limit=20)
+        except Exception as exc:
+            logger.warning("خطا در پردازش فوری صف تگ در ممیزی: %s", exc)
 
         return {
             "total_checked": total_checked,

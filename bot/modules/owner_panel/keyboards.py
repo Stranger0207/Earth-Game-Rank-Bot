@@ -42,3 +42,13 @@ def confirm_dialog_keyboard(action_key: str, payload: str = "") -> InlineKeyboar
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def back_to_panel_keyboard() -> InlineKeyboardMarkup:
+    """دکمه بازگشت به منوی اصلی پنل فرماندهی."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [styled_btn("🔙 بازگشت به پنل مدیریت", "panel_action:main_menu", STYLE_MAIN)]
+        ]
+    )
+
